@@ -12,6 +12,19 @@ from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.import_statistics.const import DATETIME_DEFAULT_FORMAT
 
+def parse_dt_aware(timestamp_str: str, timezone: zoneinfo.ZoneInfo, datetime_format: str) -> dt.datetime:
+    """
+    Parse naive datetime string to timezone-aware datetime using the given format and timezone.
+    Raises HomeAssistantError on failure.
+    """
+    try:
+        naive = dt.datetime.strptime(timestamp_str, datetime_format)
+    except ValueError as exc:
+        msg = f"Invalid timestamp: {timestamp_str}. The timestamp must be in the format '{datetime_format}'."
+        raise HomeAssistantError(msg) from exc
+    return naive.replace(tzinfo=timezone)
+
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -270,3 +283,17 @@ def add_unit_to_dataframe(source: str, unit_from_where: UnitFrom, unit_from_row:
         handle_error(f"Unit does not exist. Statistic ID: {statistic_id}.")
         return ""
     return unit_from_row
+
+
+def get_sum_stat_relaxed(row: pd.Series, timezone: zoneinfo.ZoneInfo, datetime_format: str = DATETIME_DEFAULT_FORMAT) -> dict:
+    """
+    Like get_sum_stat, but DOES NOT require full-hour timestamps.
+    Suitable for 15-minute intervals (e.g., 00:15, 00:30, 00:45).
+    Expected keys in row: "start" (str) and "sum" (numeric-like), optional "state".
+    """
+    if "sum" not in row or not is_valid_float(row["sum"]):
+        return {}
+    start_dt = parse_dt_aware(row["start"], timezone, datetime_format)
+    if "state" in row.index and is_valid_float(row["state"]):
+        return {"start": start_dt, "sum": row["sum"], "state": row["state"]}
+    return {"start": start_dt, "sum": row["sum"]}
